@@ -77,8 +77,6 @@ gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" \
 kubectl cluster-info
 ```
 
-> **Note:** The adapter uses the Kubernetes client to create/manage resources. The kubeconfig must be configured before running locally.
-
 ### Run
 
 ```bash
@@ -215,8 +213,9 @@ When `rbac.namespaceAdmin=true`, the adapter gets full access to:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `logging.verbosity` | Log verbosity level (0-10, higher = more verbose) | `2` |
-| `logging.logtostderr` | Log to stderr instead of files | `true` |
+| `logging.level` | Log level (`debug`, `info`, `warn`, `error`) | `info` |
+| `logging.format` | Log format (`text`, `json`) | `text` |
+| `logging.output` | Log output (`stdout`, `stderr`) | `stderr` |
 
 ### Scheduling
 
@@ -368,8 +367,9 @@ helm install landing-zone ./charts/ \
 
 ```bash
 helm install landing-zone ./charts/ \
-  --set logging.verbosity=5 \
-  --set logging.logtostderr=true \
+  --set logging.level=debug \
+  --set logging.format=json \
+  --set logging.output=stdout \
   --set broker.type=googlepubsub \
   --set broker.googlepubsub.projectId=my-gcp-project \
   --set broker.googlepubsub.topic=my-topic \
@@ -407,8 +407,9 @@ rbac:
   namespaceAdmin: true
 
 logging:
-  verbosity: 3
-  logtostderr: true
+  level: debug
+  format: json
+  output: stderr
 
 hyperfleetApi:
   baseUrl: https://api.hyperfleet.example.com

@@ -34,6 +34,10 @@ export HYPERFLEET_API_VERSION="${HYPERFLEET_API_VERSION:-v1}"
 : "${HYPERFLEET_API_BASE_URL:?Set HYPERFLEET_API_BASE_URL}"
 
 # Configure kubeconfig for GKE cluster (required for K8s resource management)
+# KUBECONFIG should be set in .env to ensure adapter uses kubeconfig instead of in-cluster config
+: "${KUBECONFIG:?Set KUBECONFIG in .env (e.g., export KUBECONFIG=\$HOME/.kube/config)}"
+echo "Using KUBECONFIG: $KUBECONFIG"
+
 if [ -n "$GKE_CLUSTER_NAME" ] && [ -n "$GCP_PROJECT_ID" ]; then
   if [ -n "$GKE_CLUSTER_REGION" ]; then
     echo "Configuring kubeconfig for GKE cluster: $GKE_CLUSTER_NAME (region: $GKE_CLUSTER_REGION)..."
@@ -160,4 +164,9 @@ echo "Starting adapter..."
 echo "  Broker type: $BROKER_TYPE"
 echo "  Broker config: $BROKER_CONFIG_FILE"
 echo "  Adapter config: $ADAPTER_CONFIG_PATH"
-exec hyperfleet-adapter serve -v 2 --logtostderr "$@"
+exec hyperfleet-adapter serve \
+  --config="$ADAPTER_CONFIG_PATH" \
+  --log-level="${LOG_LEVEL:-debug}" \
+  --log-format="${LOG_FORMAT:-text}" \
+  --log-output="${LOG_OUTPUT:-stderr}" \
+  "$@"

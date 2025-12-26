@@ -6,8 +6,8 @@
 replicaCount: 1
 
 image:
-  registry: quay.io/openshift-hyperfleet
-  repository: hyperfleet-adapter
+  registry: registry.ci.openshift.org
+  repository: ci/hyperfleet-adapter
   pullPolicy: Always
   tag: "latest"
 
@@ -29,10 +29,12 @@ rbac:
 
 # Logging configuration
 logging:
-  # Verbosity level (0-10, higher = more verbose)
-  verbosity: 2
-  # Log to stderr instead of files
-  logtostderr: true
+  # Log level: debug, info, warn, error
+  level: info
+  # Log format: text, json
+  format: text
+  # Log output: stdout, stderr
+  output: stderr
 
 # Platform-specific scheduling
 nodeSelector: {}
