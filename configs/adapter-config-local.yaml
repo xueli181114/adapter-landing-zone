@@ -1,0 +1,47 @@
+# HyperFleet Landing Zone Adapter - Local Development Configuration
+#
+# This file is generated from template using envsubst.
+# Uses environment variables from .env file.
+#
+# Usage: envsubst < configs/adapter-config-local.yaml > /tmp/adapter-config.yaml
+#
+# Note: Broker connection settings are in a SEPARATE file (broker-local-*.yaml)
+# and loaded via BROKER_CONFIG_FILE environment variable.
+
+apiVersion: hyperfleet.redhat.com/v1alpha1
+kind: AdapterConfig
+metadata:
+  name: landing-zone-adapter
+  labels:
+    hyperfleet.io/adapter-type: landing-zone
+    hyperfleet.io/component: adapter
+
+spec:
+  adapter:
+    version: "0.1.0"
+
+  # Log the full merged configuration after load
+  debugConfig: $HYPERFLEET_DEBUG_CONFIG
+
+  clients:
+    # HyperFleet HTTP API client
+    hyperfleetApi:
+      baseUrl: $HYPERFLEET_API_BASE_URL
+      version: $HYPERFLEET_API_VERSION
+      timeout: 2s
+      retryAttempts: 3
+      retryBackoff: exponential
+
+    # Broker subscription configuration (topic/subscription metadata)
+    # Note: Actual broker connection is configured via BROKER_CONFIG_FILE
+    broker:
+      subscriptionId: "$BROKER_SUBSCRIPTION_ID"
+      topic: "$BROKER_TOPIC"
+
+    # Kubernetes client configuration
+    kubernetes:
+      apiVersion: "v1"
+      # Uses kubeconfig for local development
+      kubeConfigPath: "$KUBECONFIG"
+      qps: 100
+      burst: 200

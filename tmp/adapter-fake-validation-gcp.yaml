@@ -1,0 +1,299 @@
+# HyperFleet GCP Validation Adapter Configuration
+#
+# This adapter creates a validation job for GCP clusters to verify
+# cluster readiness and configuration.
+#
+# Job template reference: job-template.yaml
+apiVersion: hyperfleet.redhat.com/v1alpha1
+kind: AdapterTaskConfig
+metadata:
+  name: fake-gcp-validation-adapter
+  namespace: hyperfleet-system
+  labels:
+    hyperfleet.io/adapter-type: validation
+    hyperfleet.io/component: adapter
+    hyperfleet.io/provider: gcp
+spec:
+  adapter:
+    version: "0.1.0"
+  # ============================================================================
+  # HyperFleet API Configuration
+  # ============================================================================
+  hyperfleetApi:
+    timeout: 2s
+    retryAttempts: 3
+  # ============================================================================
+  # Kubernetes Configuration
+  # ============================================================================
+  kubernetes:
+    apiVersion: "batch/v1"
+  # ============================================================================
+  # Parameters
+  # ============================================================================
+  params:
+    - name: "hyperfleetApiBaseUrl"
+      source: "env.HYPERFLEET_API_BASE_URL"
+      type: "string"
+      description: "Base URL for the HyperFleet API"
+      required: true
+    - name: "hyperfleetApiVersion"
+      source: "env.HYPERFLEET_API_VERSION"
+      type: "string"
+      default: "v1"
+      description: "API version to use"
+    - name: "clusterId"
+      source: "event.id"
+      type: "string"
+      description: "Unique identifier for the target cluster"
+      required: true
+    - name: "validatorImage"
+      source: "env.VALIDATOR_IMAGE"
+      type: "string"
+      default: "quay.io/rh-ee-dawang/fake-gcp-validator:dev-3253941"
+      description: "Container image for the GCP validator"
+    - name: "statusReporterImage"
+      source: "env.STATUS_REPORTER_IMAGE"
+      type: "string"
+      default: "quay.io/rh-ee-dawang/status-reporter:dev-fd11719"
+      description: "Container image for the status reporter"
+    - name: "simulateResult"
+      source: "env.SIMULATE_RESULT"
+      type: "string"
+      default: "success"
+      description: "Simulated validation result (success/failure)"
+    - name: "resultPath"
+      # source: "env.RESULTS_PATH"
+      type: "string"
+      default: "/results/adapter-result.json"
+      description: "Adapter shared result path with status reporter"
+    - name: "maxWaitTimeSeconds"
+      source: "env.MAX_WAIT_TIME_SECONDS"
+      type: "int"
+      default: "300"
+      description: "Maximum time to wait for validation completion"
+  # ============================================================================
+  # Preconditions
+  # ============================================================================
+  # Preconditions run before resource operations to validate state
+  preconditions:
+    - name: "clusterDetails"
+      apiCall:
+        method: "GET"
+        url: "{{ .hyperfleetApiBaseUrl }}/api/hyperfleet/{{ .hyperfleetApiVersion }}/clusters/{{ .clusterId }}"
+        timeout: 10s
+        retryAttempts: 3
+        retryBackoff: "exponential"
+      capture:
+        - name: "clusterName"
+          field: "name"
+        - name: "clusterPhase"
+          field: "status.phase"
+        - name: "generationId"
+          field: "generation"
+      conditions:
+        - field: "clusterPhase"
+          operator: "in"
+          values: ["NotReady", "Ready"]
+        - field: "clusterDetails.status.phase"
+          operator: "in"
+          values: ["NotReady", "Ready"]
+    - name: "clusterStatuses"
+      apiCall:
+        method: "GET"
+        url: "{{ .hyperfleetApiBaseUrl }}/api/hyperfleet/{{ .hyperfleetApiVersion }}/clusters/{{ .clusterId }}/statuses"
+      capture:
+        - name: "lzStatus"
+          field: "{.items[?(@.adapter=='landing-zone-adapter')].data.namespace.status}"
+        - name: "notexists"
+          field: "{.items[?(@.adapter=='not-exists-adapter')].data.namespace.status}"
+        - name: "clusterNamespace"
+          field: "{.items[?(@.adapter=='landing-zone-adapter')].data.namespace.name}"
+      conditions:
+        - field: "lzStatus"
+          operator: "in"
+          values: ["Active", "Inactive"]
+        - field: "clusterNamespace"
+          operator: "exists"
+       
+         
+  # ============================================================================
+  # Resources
+  # ============================================================================
+  resources:
+    # ==========================================================================
+    # Resource: GCP Validation Job
+    # ==========================================================================
+    - name: "gcpValidationJob"
+      manifest:
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: "gcp-validator-{{ .clusterId | lower }}-{{ .generationId }}"
+          namespace: "{{ .clusterNamespace }}"
+          labels:
+            hyperfleet.io/cluster-id: "{{ .clusterId }}"
+            hyperfleet.io/managed-by: "fake-gcp-validation-adapter"
+            hyperfleet.io/resource-type: "validation-job"
+            hyperfleet.io/generation: "{{ .generationId }}"
+            app: gcp-validator
+          annotations:
+            hyperfleet.io/created-by: "hyperfleet-adapter"
+            hyperfleet.io/generation: "{{ .generationId }}"
+        spec:
+          backoffLimit: 0
+          activeDeadlineSeconds: 310
+          template:
+            metadata:
+              labels:
+                app: gcp-validator
+                hyperfleet.io/cluster-id: "{{ .clusterId }}"
+            spec:
+              serviceAccountName: gcp-validator
+              restartPolicy: Never
+              volumes:
+                - name: results
+                  emptyDir: { }
+              containers:
+                - name: fake-validator
+                  image: "{{ .validatorImage }}"
+                  imagePullPolicy: Always
+                  env:
+                    - name: SIMULATE_RESULT
+                      value: "{{ .simulateResult }}"
+                    - name: RESULTS_PATH
+                      value: "{{ .resultPath }}"
+                    - name: CLUSTER_ID
+                      value: "{{ .clusterId }}"
+                  volumeMounts:
+                    - name: results
+                      mountPath: /results
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "100m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "200m"
+                - name: status-reporter
+                  image: "{{ .statusReporterImage }}"
+                  imagePullPolicy: Always
+                  env:
+                    - name: JOB_NAME
+                      value: "gcp-validator-{{ .clusterId | lower }}-{{ .generationId }}"
+                    - name: JOB_NAMESPACE
+                      value: "{{ .clusterId | lower }}"
+                    - name: POD_NAME
+                      valueFrom:
+                        fieldRef:
+                          fieldPath: metadata.name
+                    - name: RESULTS_PATH
+                      value: "{{ .resultPath }}"
+                    - name: POLL_INTERVAL_SECONDS
+                      value: "2"
+                    - name: MAX_WAIT_TIME_SECONDS
+                      value: "{{ .maxWaitTimeSeconds }}"
+                    - name: CONDITION_TYPE
+                      value: "Available"
+                    - name: LOG_LEVEL
+                      value: "info"
+                    - name: ADAPTER_CONTAINER_NAME
+                      value: "fake-validator"
+                  volumeMounts:
+                    - name: results
+                      mountPath: /results
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "100m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "200m"
+      discovery:
+        namespace: "{{ .clusterNamespace }}"
+        byName: ""
+        # bySelectors:
+        #   labelSelector:
+        #     hyperfleet.io/resource-type: "validation-job"
+        #     hyperfleet.io/cluster-id: "{{ .clusterId }}"
+        #     hyperfleet.io/managed-by: "fake-gcp-validation-adapter"
+  # ============================================================================
+  # Post-Processing
+  # ============================================================================
+  post:
+    payloads:
+      # Build status payload inline
+      - name: "clusterStatusPayload"
+        build:
+          adapter: "{{ .metadata.name }}"
+          conditions:
+            # Applied: Job successfully created
+            - type: "Applied"
+              status:
+                expression: |
+                  has(resources.gcpValidationJob) ? "True" : "False"
+                default: "False"
+              reason:
+                expression: |
+                  has(resources.gcpValidationJob)
+                    ? "JobApplied"
+                    : "JobPending"
+              message:
+                expression: |
+                  has(resources.gcpValidationJob)
+                    ? "Validation job applied successfully"
+                    : "Validation job is pending to applied"
+            # Available: Check job status conditions
+            - type: "Available"
+              status:
+                # expression: |
+                #   resources.?gcpValidationJob.?status.?conditions.orValue([]).exists(c, c.type == "Available")
+                #     ? resources.gcpValidationJob.status.conditions.filter(c, c.type == "Available")[0].status : "False"
+                # expression: |
+                #   resources.?gcpValidationJob.?status.?phase.fake
+                # default: "DefaultValue"
+                field: "resources.gcpValidationJob.status.conditions[?(@.type == 'Failed')].status"
+                default: "False"
+              
+              reason:
+                expression: |
+                  resources.?gcpValidationJob.?status.?conditions.orValue([]).exists(c, c.type == "Available")
+                    ? resources.gcpValidationJob.status.conditions.filter(c, c.type == "Available")[0].reason
+                  : resources.?gcpValidationJob.?status.?conditions.orValue([]).exists(c, c.type == "Failed") ? "ValidationFailed"
+                  : resources.?gcpValidationJob.?status.hasValue() ? "ValidationInProgress" : "ValidationPending"
+              message:
+                expression: |
+                  resources.?gcpValidationJob.?status.?conditions.orValue([]).exists(c, c.type == "Available")
+                    ? resources.gcpValidationJob.status.conditions.filter(c, c.type == "Available")[0].message
+                  : resources.?gcpValidationJob.?status.?conditions.orValue([]).exists(c, c.type == "Failed") ? "Validation failed"
+                  : resources.?gcpValidationJob.?status.hasValue() ? "Validation in progress" : "Validation is pending"
+            # Health: Adapter execution status (runtime)
+            - type: "Health"
+              status:
+                expression: |
+                  adapter.?executionStatus.orValue("") == "success" ? "True" : (adapter.?executionStatus.orValue("") == "failed" ? "False" : "Unknown")
+              reason:
+                expression: |
+                  adapter.?errorReason.orValue("") != "" ? adapter.?errorReason.orValue("") : "Healthy"
+              message:
+                expression: |
+                  adapter.?errorMessage.orValue("") != "" ? adapter.?errorMessage.orValue("") : "All adapter operations completed successfully"
+          # Event generation ID metadata field needs to use expression to avoid interpolation issues
+          observed_generation:
+            expression: "generationId"
+          observed_time: "{{ now | date \"2006-01-02T15:04:05Z07:00\" }}"
+          
+    # ============================================================================
+    # Post Actions
+    # ============================================================================
+    postActions:
+      - name: "reportClusterStatus"
+        apiCall:
+          method: "POST"
+          url: "{{ .hyperfleetApiBaseUrl }}/api/hyperfleet/{{ .hyperfleetApiVersion }}/clusters/{{ .clusterId }}/statuses"
+          body: "{{ .clusterStatusPayload }}"
+          timeout: 30s
+          retryAttempts: 3
+          retryBackoff: "exponential"
+          headers:
+            - name: "Content-Type"
+              value: "application/json"

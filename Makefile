@@ -10,7 +10,7 @@
         helm-lint helm-template helm-template-broker helm-template-rabbitmq helm-test helm-dry-run helm-package \
         helm-template-full \
         helm-install helm-upgrade helm-uninstall helm-status \
-        run-local validate-adapter-yaml validate
+        run-local run-maestro validate-adapter-yaml validate
 
 # Default values
 RELEASE_NAME ?= landing-zone
@@ -113,8 +113,11 @@ helm-status: ## Show helm release status
 
 ##@ Local Development
 
-run-local: ## Run adapter locally (auto-sources .env if exists)
+run-local: ## Run adapter locally in K8s mode (auto-sources .env if exists)
 	@./run-local.sh
+
+run-maestro: ## Run adapter locally in Maestro mode
+	@ADAPTER_MODE=maestro ./run-local.sh
 
 ##@ Validation
 

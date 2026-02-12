@@ -2,8 +2,15 @@
 # Local development runner for HyperFleet Landing Zone Adapter
 #
 # Usage:
-#   make run-local                    # Google Pub/Sub (default)
-#   BROKER_TYPE=rabbitmq make run-local  # RabbitMQ
+#   make run-local                      # K8s mode with Pub/Sub (default)
+#   make run-maestro                    # Maestro mode
+#   BROKER_TYPE=rabbitmq make run-local # RabbitMQ broker
+#   ADAPTER_MODE=maestro make run-local # Maestro mode (alternative)
+#
+# Environment variables:
+#   ADAPTER_MODE              - "k8s" (default) or "maestro"
+#   HYPERFLEET_ADAPTER_CONFIG - Override adapter config path
+#   HYPERFLEET_TASK_CONFIG    - Override task config path
 #
 # Setup:
 #   cp env.example .env
@@ -25,10 +32,13 @@ if ! command -v hyperfleet-adapter &> /dev/null; then
   exit 1
 fi
 
-# Set defaults
+# Set defaults for envsubst (envsubst doesn't support ${VAR:-default} syntax)
 export BROKER_TYPE="${BROKER_TYPE:-googlepubsub}"
 export SUBSCRIBER_PARALLELISM="${SUBSCRIBER_PARALLELISM:-1}"
 export HYPERFLEET_API_VERSION="${HYPERFLEET_API_VERSION:-v1}"
+export HYPERFLEET_DEBUG_CONFIG="${HYPERFLEET_DEBUG_CONFIG:-false}"
+export RABBITMQ_URL="${RABBITMQ_URL:-amqp://guest:guest@localhost:5672/}"
+export SIMULATE_RESULT="${SIMULATE_RESULT:-success}"
 
 # Check required env vars based on broker type
 : "${HYPERFLEET_API_BASE_URL:?Set HYPERFLEET_API_BASE_URL}"
@@ -60,7 +70,6 @@ fi
 if [ "$BROKER_TYPE" = "rabbitmq" ]; then
   echo "Using RabbitMQ broker..."
   : "${RABBITMQ_URL:=amqp://guest:guest@localhost:5672/}"
-  BROKER_CONFIG_TEMPLATE="configs/broker-local-rabbitmq.yaml"
 
   # Check if RabbitMQ is running, start if not
   CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-podman}"
@@ -88,7 +97,6 @@ else
   : "${GCP_PROJECT_ID:?Set GCP_PROJECT_ID}"
   : "${BROKER_TOPIC:?Set BROKER_TOPIC}"
   : "${BROKER_SUBSCRIPTION_ID:?Set BROKER_SUBSCRIPTION_ID}"
-  BROKER_CONFIG_TEMPLATE="configs/broker-local-pubsub.yaml"
 
   # Set up Application Default Credentials (ADC) for Go SDK
   # This is separate from gcloud CLI auth (gcloud auth login)
@@ -149,23 +157,58 @@ else
   fi
 fi
 
-# Generate broker config from template
+# Set adapter mode (k8s or maestro)
+ADAPTER_MODE="${ADAPTER_MODE:-k8s}"
+echo "Adapter mode: $ADAPTER_MODE"
+
+# Generate configs from templates
 CONFIG_DIR="${TMPDIR:-/tmp}"
 BROKER_CONFIG="${CONFIG_DIR}/broker-config.yaml"
+
+# Select broker config template based on broker type
+if [ "$BROKER_TYPE" = "rabbitmq" ]; then
+  BROKER_CONFIG_TEMPLATE="configs/broker-local-rabbitmq.yaml"
+else
+  BROKER_CONFIG_TEMPLATE="configs/broker-local-pubsub.yaml"
+fi
 
 echo "Generating broker config from $BROKER_CONFIG_TEMPLATE..."
 envsubst < "$BROKER_CONFIG_TEMPLATE" > "$BROKER_CONFIG"
 
-# Set config paths
+# Set config paths based on mode
+# If HYPERFLEET_ADAPTER_CONFIG is already set, use it (allows override)
+if [ -z "$HYPERFLEET_ADAPTER_CONFIG" ]; then
+  if [ "$ADAPTER_MODE" = "maestro" ]; then
+    export HYPERFLEET_ADAPTER_CONFIG="./configs/maestro/adapter-config.yaml"
+  else
+    # Generate adapter config from template for k8s mode
+    ADAPTER_CONFIG="${CONFIG_DIR}/adapter-config.yaml"
+    echo "Generating adapter config from configs/adapter-config-local.yaml..."
+    envsubst < "configs/adapter-config-local.yaml" > "$ADAPTER_CONFIG"
+    export HYPERFLEET_ADAPTER_CONFIG="$ADAPTER_CONFIG"
+  fi
+fi
+
+# Set task config based on mode (if not already set)
+if [ -z "$HYPERFLEET_TASK_CONFIG" ]; then
+  if [ "$ADAPTER_MODE" = "maestro" ]; then
+    export HYPERFLEET_TASK_CONFIG="./configs/maestro/adapter-task-config.yaml"
+  else
+    export HYPERFLEET_TASK_CONFIG="./configs/k8s/adapter-landing-zone.yaml"
+  fi
+fi
+
 export BROKER_CONFIG_FILE="$BROKER_CONFIG"
-export ADAPTER_CONFIG_PATH="./charts/configs/adapter-landing-zone.yaml"
 
 echo "Starting adapter..."
+echo "  Mode: $ADAPTER_MODE"
 echo "  Broker type: $BROKER_TYPE"
+echo "  Adapter config: $HYPERFLEET_ADAPTER_CONFIG"
 echo "  Broker config: $BROKER_CONFIG_FILE"
-echo "  Adapter config: $ADAPTER_CONFIG_PATH"
+echo "  Task config: $HYPERFLEET_TASK_CONFIG"
 exec hyperfleet-adapter serve \
-  --config="$ADAPTER_CONFIG_PATH" \
+  --config="$HYPERFLEET_ADAPTER_CONFIG" \
+  --task-config="$HYPERFLEET_TASK_CONFIG" \
   --log-level="${LOG_LEVEL:-debug}" \
   --log-format="${LOG_FORMAT:-text}" \
   --log-output="${LOG_OUTPUT:-stderr}" \

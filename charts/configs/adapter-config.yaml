@@ -1,0 +1,57 @@
+# HyperFleet Landing Zone Adapter - Deployment Configuration
+#
+# This file contains infrastructure and deployment-related settings:
+#   - Client connections (HyperFleet API, Kubernetes, Broker)
+#   - Connection timeouts and retry policies
+#
+# For business logic configuration (params, preconditions, resources, post-actions),
+# see adapter-landing-zone.yaml (task config)
+
+apiVersion: hyperfleet.redhat.com/v1alpha1
+kind: AdapterConfig
+metadata:
+  name: landing-zone-adapter
+  labels:
+    hyperfleet.io/adapter-type: landing-zone
+    hyperfleet.io/component: adapter
+
+spec:
+  adapter:
+    version: "0.1.0"
+
+  # Log the full merged configuration after load (default: false)
+  # Environment variable: HYPERFLEET_DEBUG_CONFIG
+  # Flag: --debug-config
+  debugConfig: false
+
+  clients:
+    # HyperFleet HTTP API client
+    hyperfleetApi:
+      # Environment variable: HYPERFLEET_API_BASE_URL
+      baseUrl: http://hyperfleet-api:8000
+      # Environment variable: HYPERFLEET_API_VERSION
+      version: v1
+      timeout: 2s
+      retryAttempts: 3
+      retryBackoff: exponential
+
+    # Broker subscription configuration
+    # Note: Actual broker connection settings (Pub/Sub or RabbitMQ) are in broker config
+    broker:
+      # Subscription ID for this adapter instance
+      # Environment variable: BROKER_SUBSCRIPTION_ID
+      subscriptionId: "hyperfleet-landing-zone-subscription"
+      # Topic to subscribe to
+      # Environment variable: BROKER_TOPIC
+      topic: "hyperfleet-clusters"
+
+    # Kubernetes client configuration
+    kubernetes:
+      apiVersion: "v1"
+      # Uses in-cluster service account by default
+      # Set kubeConfigPath for out-of-cluster access (local development)
+      # Environment variable: KUBECONFIG
+      # kubeConfigPath: ""
+      # Optional rate limits (0 uses defaults)
+      qps: 100
+      burst: 200

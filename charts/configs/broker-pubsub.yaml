@@ -1,38 +1,53 @@
 # Google Pub/Sub Broker Configuration
 # Processed via Helm tpl function
 
-broker:
-  type: googlepubsub
 
-  googlepubsub:
-    project_id: {{ required "broker.googlepubsub.projectId is required when broker.type=googlepubsub" .Values.broker.googlepubsub.projectId | quote }}
-    topic: {{ required "broker.googlepubsub.topic is required when broker.type=googlepubsub" .Values.broker.googlepubsub.topic | quote }}
-    subscription: {{ required "broker.googlepubsub.subscription is required when broker.type=googlepubsub" .Values.broker.googlepubsub.subscription | quote }}
+# ConfigMap for Google Pub/Sub Broker Configuration
 
-    # Subscription settings (fixed)
-    ack_deadline_seconds: 60
-    message_retention_duration: "604800s"
-    expiration_ttl: "2678400s"
-    enable_message_ordering: false
-    retry_min_backoff: "10s"
-    retry_max_backoff: "600s"
-
-    # Dead letter settings
-    {{- if .Values.broker.googlepubsub.deadLetterTopic }}
-    dead_letter_topic: {{ .Values.broker.googlepubsub.deadLetterTopic | quote }}
-    dead_letter_max_attempts: 5
+kind: ConfigMap
+metadata:
+  name: {{ include "landing-zone.brokerConfigMapName" . }}
+  labels:
+    {{- include "landing-zone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker-config
+    {{- if .Values.broker.type }}
+    hyperfleet.io/broker-type: {{ .Values.broker.type }}
     {{- end }}
+data: 
+  hyperfleetAPIBaseUrl: {{ .Values.hyperfleetApi.baseUrl | quote }}
 
-    # Receive settings (fixed)
-    max_outstanding_messages: 1000
-    max_outstanding_bytes: 104857600
-    num_goroutines: 10
+  broker.yaml: |
+    type: googlepubsub
 
-    # Behavior flags (fixed)
-    create_topic_if_missing: false
-    create_subscription_if_missing: false
+    googlepubsub:
+      project_id: {{ required "broker.googlepubsub.projectId is required when broker.type=googlepubsub" .Values.broker.googlepubsub.projectId | quote }}
+      topic: {{ required "broker.googlepubsub.topic is required when broker.type=googlepubsub" .Values.broker.googlepubsub.topic | quote }}
+      subscription: {{ required "broker.googlepubsub.subscription is required when broker.type=googlepubsub" .Values.broker.googlepubsub.subscription | quote }}
 
-subscriber:
-  parallelism: {{ .Values.broker.subscriber.parallelism | default 1 | int }}
+      # Subscription settings (fixed)
+      ack_deadline_seconds: 60
+      message_retention_duration: "604800s"
+      expiration_ttl: "2678400s"
+      enable_message_ordering: false
+      retry_min_backoff: "10s"
+      retry_max_backoff: "600s"
 
-log_config: false
+      # Dead letter settings
+      {{- if .Values.broker.googlepubsub.deadLetterTopic }}
+      dead_letter_topic: {{ .Values.broker.googlepubsub.deadLetterTopic | quote }}
+      dead_letter_max_attempts: 5
+      {{- end }}
+
+      # Receive settings (fixed)
+      max_outstanding_messages: 1000
+      max_outstanding_bytes: 104857600
+      num_goroutines: 10
+
+      # Behavior flags (fixed)
+      create_topic_if_missing: false
+      create_subscription_if_missing: false
+
+  subscriber:
+    parallelism: {{ .Values.broker.subscriber.parallelism | default 1 | int }}
+
+  log_config: false
